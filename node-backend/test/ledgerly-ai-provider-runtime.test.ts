@@ -40,6 +40,12 @@ describe("Ledgerly AI provider runtime", () => {
       data:{type:"item.started",item:{type:"command_execution",command:"npm test"}},
     });
     expect(codex?.content).toBe("I’m running the relevant tests now.");
+
+    const internal=humanizeLedgerlyAiProviderEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"assistant",
+      data:{type:"assistant",message:{content:[{type:"text",text:"[[LEDGERLY_TOOL_CALL]]{\"name\":\"school.search\",\"arguments\":{}}[[/LEDGERLY_TOOL_CALL]]"}]}},
+    });
+    expect(internal).toBeNull();
   });
 
   it("enforces queue backpressure", async () => {
