@@ -14,6 +14,7 @@ type TurnMessage={
   requestText?:string;chatId?:string|null;
 };
 type PendingFile={id:string;name:string;mimeType:string};
+type StoredMessage={id:string;role:"system"|"user"|"assistant"|"tool";content:string;createdAt:string;metadata?:Record<string,any>};
 const ENGINEERING_KEYS=new Set(["kato","maya","tendo","nia","jabali","safi"]);
 const LEDGERLY_AI_ENTRY:Employee={id:"",key:"",name:"Ledgerly AI",role:"Automatic routing — can use every tool your account is allowed to use",description:"",status:"active"};
 type TaskStatus="idle"|"sending"|"queued"|"error";
@@ -73,6 +74,37 @@ export function LedgerlyAiTeamChatPage(){
     scrollRef.current?.scrollTo({top:scrollRef.current.scrollHeight,behavior:"smooth"});
   },[turns,pending]);
 
+  useEffect(()=>{
+    const chatEntries=Object.entries(roomChats);
+    if(!chatEntries.length)return;
+    const sync=async()=>{
+      const incoming:TurnMessage[]=[];
+      await Promise.all(chatEntries.map(async([employeeId,chatId])=>{
+        try{
+          const detail=await get<any>("/ledgerly-ai/my/chats/"+chatId);
+          const employee=myEmployees.find(x=>x.id===employeeId);
+          for(const message of (detail.messages??[]) as StoredMessage[]){
+            if(message.role!=="assistant")continue;
+            incoming.push({
+              id:message.id,employeeId,employeeKey:employee?.key??null,
+              employeeName:String(message.metadata?.employeeName??employee?.name??"Ledgerly AI"),
+              role:"assistant",content:message.content,createdAt:message.createdAt,chatId,
+            });
+          }
+        }catch{/* one employee refresh must not stop the room */}
+      }));
+      if(!incoming.length)return;
+      setTurns(current=>{
+        const known=new Set(current.map(x=>x.id));
+        const fresh=incoming.filter(x=>!known.has(x.id));
+        return fresh.length?[...current,...fresh].sort((a,b)=>new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()):current;
+      });
+    };
+    void sync();
+    const timer=window.setInterval(()=>void sync(),1200);
+    return()=>window.clearInterval(timer);
+  },[roomChats,myEmployees]);
+
   function toggle(id:string){
     setSelected(current=>{
       const next=new Set(current);
@@ -86,10 +118,9 @@ export function LedgerlyAiTeamChatPage(){
   }
 
   async function sendToEmployee(employee:Employee,message:string,requestKey:string,file:PendingFile|null){
-    const existingChatId=roomChats[employee.id];
+    let chatId=roomChats[employee.id];
     const body={
       message,agentId:employee.id||null,taskKind:"chat",
-      ...(existingChatId?{}:{title:"Team room: "+message.slice(0,60)}),
       ...(file?{attachments:[{
         name:file.name,mimeType:"text/plain",kind:"context",
         content:`Uploaded file reference for tool use.\nfileId: ${file.id}\noriginalName: ${file.name}\nmimeType: ${file.mimeType}\nIf asked to create a scheme from this file, call the academics.scheme.import_from_document tool with this exact fileId — do not guess a different one.`,
@@ -97,16 +128,20 @@ export function LedgerlyAiTeamChatPage(){
     };
     const headers={"Idempotency-Key":requestKey+"-"+employee.id};
     try{
-      const response=existingChatId
-        ? await post<any>("/ledgerly-ai/my/chats/"+existingChatId+"/messages",body,headers)
-        : await post<any>("/ledgerly-ai/chat",body,headers);
-      const chatId=response.chat?.id;
-      if(chatId&&chatId!==existingChatId)setRoomChats(current=>({...current,[employee.id]:chatId}));
-      setTurns(current=>[...current,{
-        id:requestKey+"-"+employee.id,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
+      if(!chatId){
+        const created=await post<{id:string}>("/ledgerly-ai/chats",{
+          title:"Team room: "+message.slice(0,60),agentId:employee.id||null,
+        });
+        chatId=created.id;
+        setRoomChats(current=>({...current,[employee.id]:created.id}));
+      }
+      const response=await post<any>("/ledgerly-ai/my/chats/"+chatId+"/messages",body,headers);
+      const turnId=String(response.message?.id??requestKey+"-"+employee.id);
+      setTurns(current=>current.some(x=>x.id===turnId)?current:[...current,{
+        id:turnId,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
         role:"assistant",content:response.message?.content??"(No reply.)",
         createdAt:response.message?.createdAt??new Date().toISOString(),
-        requestText:message,chatId:chatId??existingChatId??null,
+        requestText:message,chatId,
       }]);
     }catch(err){
       setTurns(current=>[...current,{
@@ -238,7 +273,7 @@ function TurnView({turn,taskStatus,onRequestBuild}:{
       <p>{turn.content}</p>
       {canBuild&&<div className="laitc-build-row">
         {taskStatus==="queued"
-          ? <span className="laitc-build-queued"><ShieldCheck size={12}/> Sent to {turn.employeeName} as a real engineering task — check the Admin Console incident queue for progress.</span>
+          ? <span className="laitc-build-queued"><ShieldCheck size={12}/> {turn.employeeName} is working on it. Real progress messages will appear here in this chat.</span>
           : <button className="secondary laitc-build-btn" disabled={taskStatus==="sending"} onClick={()=>onRequestBuild(turn)}>
               <Hammer size={12}/> {taskStatus==="sending"?"Queuing…":taskStatus==="error"?"Try again":"Build this for real"}
             </button>}
