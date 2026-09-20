@@ -137,12 +137,17 @@ export function LedgerlyAiTeamChatPage(){
       }
       const response=await post<any>("/ledgerly-ai/my/chats/"+chatId+"/messages",body,headers);
       const turnId=String(response.message?.id??requestKey+"-"+employee.id);
-      setTurns(current=>current.some(x=>x.id===turnId)?current:[...current,{
+      const completed:TurnMessage={
         id:turnId,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
         role:"assistant",content:response.message?.content??"(No reply.)",
         createdAt:response.message?.createdAt??new Date().toISOString(),
         requestText:message,chatId,
-      }]);
+      };
+      setTurns(current=>{
+        const index=current.findIndex(x=>x.id===turnId);
+        if(index<0)return[...current,completed];
+        return current.map((turn,i)=>i===index?{...turn,...completed}:turn);
+      });
     }catch(err){
       setTurns(current=>[...current,{
         id:requestKey+"-"+employee.id,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
