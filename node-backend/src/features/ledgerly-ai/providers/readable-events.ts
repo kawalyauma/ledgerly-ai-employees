@@ -49,6 +49,8 @@ function claudeUpdate(data:Record<string,unknown>,event:ProviderStreamEvent):Led
     const blocks=Array.isArray(content)?content:[];
     const textBlock=blocks.map(record).find(x=>x?.type==="text"&&typeof x.text==="string");
     const text=clean(textBlock?.text);
+    if(text.includes("[[LEDGERLY_TOOL_CALL]]")||text.includes("[[/LEDGERLY_TOOL_CALL]]")||
+       text.includes("[[LEDGERLY_AI_QA]]")||text.includes("[[/LEDGERLY_AI_QA]]"))return null;
     if(text)return{content:text,kind:"message",key:`claude:text:${text}`};
     const tool=blocks.map(record).find(x=>x?.type==="tool_use"&&typeof x.name==="string");
     if(tool){
@@ -77,6 +79,8 @@ function codexUpdate(data:Record<string,unknown>,event:ProviderStreamEvent):Ledg
   const itemType=String(item.type??"");
   if(itemType==="agent_message"){
     const text=clean(item.text);
+    if(text.includes("[[LEDGERLY_TOOL_CALL]]")||text.includes("[[/LEDGERLY_TOOL_CALL]]")||
+       text.includes("[[LEDGERLY_AI_QA]]")||text.includes("[[/LEDGERLY_AI_QA]]"))return null;
     return text?{content:text,kind:"message",key:`codex:text:${text}`}:null;
   }
   if(itemType==="command_execution"){
